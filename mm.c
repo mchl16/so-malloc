@@ -60,7 +60,7 @@ static size_t get_size(block_t *block) {
 static void set_header(block_t *block, size_t size, bool is_allocated) {
   block->header = size | is_allocated;
 }
-
+//
 /*
  * mm_init - Called when a new trace starts.
  */
