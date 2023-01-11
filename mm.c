@@ -40,7 +40,7 @@
 #endif /* def DRIVER */
 
 typedef struct {
-  int32_t header;
+  uint32_t header;
   /*
    * We don't know what the size of the payload will be, so we will
    * declare it as a zero-length array.  This allow us to obtain a
@@ -60,7 +60,18 @@ static size_t get_size(block_t *block) {
 static void set_header(block_t *block, size_t size, bool is_allocated) {
   block->header = size | is_allocated;
 }
-//
+
+uint32_t root; //compressed pointer to the root of the splay tree
+
+/* merge a block with its right neighbor if possible 
+ * (two empty blocks or extend the next bloc)
+ */
+
+const uint32_t allocated_mask=0x40000000;
+const uint32_t prev_mask=0x80000000;
+
+
+
 /*
  * mm_init - Called when a new trace starts.
  */
@@ -68,7 +79,6 @@ int mm_init(void) {
   /* Pad heap start so first payload is at ALIGNMENT. */
   if ((long)mem_sbrk(ALIGNMENT - offsetof(block_t, payload)) < 0)
     return -1;
-
   return 0;
 }
 
@@ -77,13 +87,11 @@ int mm_init(void) {
  *      Always allocate a block whose size is a multiple of the alignment.
  */
 void *malloc(size_t size) {
-  size = round_up(sizeof(block_t) + size);
-  block_t *block = mem_sbrk(size);
-  if ((long)block < 0)
-    return NULL;
-
-  set_header(block, size, true);
-  return block->payload;
+  size = round_up(4 + size);
+  block_t *bl=splay_find(size);
+  if(!bl){
+    if(!m)
+  }
 }
 
 /*
