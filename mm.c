@@ -70,7 +70,30 @@ uint32_t root; //compressed pointer to the root of the splay tree
 const uint32_t allocated_mask=0x40000000;
 const uint32_t prev_mask=0x80000000;
 
+uint32_t get_size(block_t *bl){
+  uint32_t mask=!(allocated_mask|prev_mask);
+  return (*(uint32_t*)bl)|mask;
+}
 
+void set_size(block_t *bl,uint32_t size){
+  *(uint32_t*)bl=(size | allocated_mask | prev_mask);
+}
+
+/* Merge a newly free block with its free neighbors */
+block_t *maybe_merge(block_t *bl){
+  block_t *next=next_bl(bl);
+  if(!get_allocated(next)){
+    splay_remove(next);
+    set_size(bl,get_size(bl)+get_size(next));
+  }
+  block_t *prev=prev_bl(bl);
+  if(!get_allocated(prev)){
+    splay_remove(prev);
+    set_size(prev,get_size(prev)+get_size(bl));
+    bl=prev;
+  }
+  return bl;
+}
 
 /*
  * mm_init - Called when a new trace starts.
@@ -83,22 +106,37 @@ int mm_init(void) {
 }
 
 /*
- * malloc - Allocate a block by incrementing the brk pointer.
- *      Always allocate a block whose size is a multiple of the alignment.
+ * malloc - If a block of desired size (or larger) is in the splay tree of free blocks,
+ *          remove it, allocate its part and readd the rest (first fit, best fit seems to be too hard to implement using splay trees).
+ *          Otherwise allocate a new block using mem_sbrk (if possible).
  */
 void *malloc(size_t size) {
   size = round_up(4 + size);
   block_t *bl=splay_find(size);
   if(!bl){
-    if(!m)
+    void *ptr=mem_sbrk(size);
+    return ptr<0 ? NULL : ptr;
+  }
+  else{
+    splay_remove(bl);
+    int s=get_size(bl);
+    if(s>size){
+      create_bl(&bl+size,s-size);
+      set_size(bl,size);
+    }
+    return bl;
   }
 }
 
 /*
- * free - We don't know how to free a block.  So we ignore this call.
- *      Computers have big memories; surely it won't be a problem.
+ * free - If the block being freed has free neighbors,
+ *        remove them from the splay tree, merge into one free block
+ *        and add it back to the tree.
  */
 void free(void *ptr) {
+  block *bl=ptr-4;
+  bl=maybe_merge(bl);
+  splay_add(bl);
 }
 
 /*
