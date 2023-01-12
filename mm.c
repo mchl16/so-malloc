@@ -53,66 +53,63 @@ static size_t round_up(size_t size) {
   return (size + ALIGNMENT - 1) & -ALIGNMENT;
 }
 
-static size_t get_size(block_t *block) {
-  return block->header & -2;
+uint32_t root; // compressed pointer to the root of the splay tree
+
+/* Functions for setting boundary tags (size, allocation status etc) */
+
+const uint32_t allocated_mask = 0x40000000;
+const uint32_t prev_mask = 0x80000000;
+
+uint32_t get_size(block_t *bl) {
+  uint32_t mask = !(allocated_mask | prev_mask);
+  return (*(uint32_t *)bl) & mask;
 }
 
-static void set_header(block_t *block, size_t size, bool is_allocated) {
-  block->header = size | is_allocated;
-}
-
-uint32_t root; //compressed pointer to the root of the splay tree
-
-/* merge a block with its right neighbor if possible 
- * (two empty blocks or extend the next bloc)
- */
-
-const uint32_t allocated_mask=0x40000000;
-const uint32_t prev_mask=0x80000000;
-
-uint32_t get_size(block_t *bl){
-  uint32_t mask=!(allocated_mask|prev_mask);
-  return (*(uint32_t*)bl)&mask;
-}
-
-void set_size(block_t *bl,uint32_t size){
-  *(uint32_t*)bl=(size | allocated_mask | prev_mask);
-}
-
-/* Utility functions for finding next blocks 
- * (or NULL for allocated/non-existent blocks)
- */
-block_t next_bl(block_t *bl){
-  block_t *res=bl+get_size(bl);
-  return res<mem_heap_hi ? res : NULL;
-}
-
-block_t prev_bl(block_t *bl){
-  if((*(uint32_t)bl) | prev_mask) return NULL; //previous block allocated or non-existent
-  block_t *ptr=bl-1;
-  uint32_t s=get_size(ptr); //empty blocks have 2 boundary tags
-  return ptr-(s-1);
-}
-
-/* Merge a newly free block with its free neighbors (if possible) */
-block_t *maybe_merge(block_t *bl){
-  block_t *next=next_bl(bl);
-  if(next){
-    splay_remove(next);
-    set_size(bl,get_size(bl)+get_size(next));
-  }
-  block_t *prev=prev_bl(bl);
-  if(prev){
-    splay_remove(prev);
-    set_size(prev,get_size(prev)+get_size(bl));
-    bl=prev;
-  }
-  return bl;
+void set_size(block_t *bl, uint32_t size) {
+  *(uint32_t *)bl = (size | allocated_mask | prev_mask);
 }
 
 /* Splay tree functions */
-block_t *splay_find(uint32_t size){
+block_t *splay_find(uint32_t size) {
   return NULL;
+}
+
+void splay_insert(block_t *node) {
+}
+
+void splay_remove(block_t *node) {
+}
+
+/* Utility functions for finding next blocks
+ * (or NULL for allocated/non-existent blocks)
+ */
+block_t *next_bl(block_t *bl) {
+  block_t *res = bl + get_size(bl);
+  return (void *)res < mem_heap_hi() ? res : NULL;
+}
+
+block_t *prev_bl(block_t *bl) {
+  if ((*(uint32_t *)bl) | prev_mask)
+    return NULL; // previous block allocated or non-existent
+  block_t *ptr = bl - 1;
+  uint32_t s = get_size(ptr); // empty blocks have 2 boundary tags
+  return ptr - (s - 1);
+}
+
+/* Merge a newly free block with its free neighbors (if possible) */
+block_t *maybe_merge(block_t *bl) {
+  block_t *next = next_bl(bl);
+  if (next) {
+    splay_remove(next);
+    set_size(bl, get_size(bl) + get_size(next));
+  }
+  block_t *prev = prev_bl(bl);
+  if (prev) {
+    splay_remove(prev);
+    set_size(prev, get_size(prev) + get_size(bl));
+    bl = prev;
+  }
+  return bl;
 }
 
 /*
@@ -126,23 +123,23 @@ int mm_init(void) {
 }
 
 /*
- * malloc - If a block of desired size (or larger) is in the splay tree of free blocks,
- *          remove it, allocate its part and readd the rest (first fit, best fit seems to be too hard to implement using splay trees).
- *          Otherwise allocate a new block using mem_sbrk (if possible).
+ * malloc - If a block of desired size (or larger) is in the splay tree of free
+ * blocks, remove it, allocate its part and readd the rest (first fit, best fit
+ * seems to be too hard to implement using splay trees). Otherwise allocate a
+ * new block using mem_sbrk (if possible).
  */
 void *malloc(size_t size) {
   size = round_up(4 + size);
-  block_t *bl=splay_find(size);
-  if(!bl){
-    void *ptr=mem_sbrk(size);
-    return ptr<0 ? NULL : ptr;
-  }
-  else{
+  block_t *bl = splay_find(size);
+  if (!bl) {
+    void *ptr = mem_sbrk(size);
+    return ptr < 0 ? NULL : ptr;
+  } else {
     splay_remove(bl);
-    int s=get_size(bl);
-    if(s>size){
-      create_bl(&bl+size,s-size);
-      set_size(bl,size);
+    int s = get_size(bl);
+    if (s > size) {
+      create_bl(&bl + size, s - size);
+      set_size(bl, size);
     }
     return bl;
   }
@@ -154,9 +151,9 @@ void *malloc(size_t size) {
  *        and add it back to the tree.
  */
 void free(void *ptr) {
-  block *bl=ptr-4;
-  bl=maybe_merge(bl);
-  splay_add(bl);
+  block_t *bl = ptr;
+  bl = maybe_merge(bl - 1);
+  splay_insert(bl);
 }
 
 /*
