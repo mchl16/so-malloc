@@ -53,42 +53,49 @@ static size_t round_up(size_t size) {
   return (size + ALIGNMENT - 1) & -ALIGNMENT;
 }
 
-uint32_t root; // compressed pointer to the root of the splay tree
+//static uint32_t root; // compressed pointer to the root of the splay tree
 
 /* Functions for setting boundary tags (size, allocation status etc) */
 
-const uint32_t allocated_mask = 0x40000000;
-const uint32_t prev_mask = 0x80000000;
+static const uint32_t allocated_mask = 0x40000000;
+static const uint32_t prev_mask = 0x80000000;
 
-uint32_t get_size(block_t *bl) {
+static inline uint32_t get_size(block_t *bl) {
   uint32_t mask = !(allocated_mask | prev_mask);
   return (*(uint32_t *)bl) & mask;
 }
 
-void set_size(block_t *bl, uint32_t size) {
+static inline void set_size(block_t *bl, uint32_t size) {
   *(uint32_t *)bl = (size | allocated_mask | prev_mask);
 }
 
 /* Splay tree functions */
-block_t *splay_find(uint32_t size) {
+static inline block_t *splay_find(uint32_t size) {
   return NULL;
 }
 
-void splay_insert(block_t *node) {
+static inline void splay_insert(block_t *node) {
 }
 
-void splay_remove(block_t *node) {
+static inline void splay_remove(block_t *node) {
+}
+
+/* Create a new (unallocated) block and insert it into the tree */
+static inline void create_bl(block_t *ptr,uint32_t size){
+  *(uint32_t*)ptr=size;
+  splay_insert(ptr);
 }
 
 /* Utility functions for finding next blocks
  * (or NULL for allocated/non-existent blocks)
  */
-block_t *next_bl(block_t *bl) {
+
+static inline block_t *next_bl(block_t *bl) {
   block_t *res = bl + get_size(bl);
   return (void *)res < mem_heap_hi() ? res : NULL;
 }
 
-block_t *prev_bl(block_t *bl) {
+static inline block_t *prev_bl(block_t *bl) {
   if ((*(uint32_t *)bl) | prev_mask)
     return NULL; // previous block allocated or non-existent
   block_t *ptr = bl - 1;
@@ -97,7 +104,7 @@ block_t *prev_bl(block_t *bl) {
 }
 
 /* Merge a newly free block with its free neighbors (if possible) */
-block_t *maybe_merge(block_t *bl) {
+static inline block_t *maybe_merge(block_t *bl) {
   block_t *next = next_bl(bl);
   if (next) {
     splay_remove(next);
@@ -131,17 +138,20 @@ int mm_init(void) {
 void *malloc(size_t size) {
   size = round_up(4 + size);
   block_t *bl = splay_find(size);
+
+  //printf("%lx\n",(long)mem_sbrk(0));
+  //fflush(stdout);
   if (!bl) {
-    void *ptr = mem_sbrk(size);
-    return ptr < 0 ? NULL : ptr;
+    block_t *ptr = mem_sbrk(size);
+    return ptr < 0 ? NULL : (void*)(ptr+1);
   } else {
     splay_remove(bl);
     int s = get_size(bl);
     if (s > size) {
-      create_bl(&bl + size, s - size);
+      create_bl(bl + size, s - size);
       set_size(bl, size);
     }
-    return bl;
+    return (void*)(bl+1);
   }
 }
 
