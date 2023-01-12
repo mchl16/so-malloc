@@ -72,27 +72,47 @@ const uint32_t prev_mask=0x80000000;
 
 uint32_t get_size(block_t *bl){
   uint32_t mask=!(allocated_mask|prev_mask);
-  return (*(uint32_t*)bl)|mask;
+  return (*(uint32_t*)bl)&mask;
 }
 
 void set_size(block_t *bl,uint32_t size){
   *(uint32_t*)bl=(size | allocated_mask | prev_mask);
 }
 
-/* Merge a newly free block with its free neighbors */
+/* Utility functions for finding next blocks 
+ * (or NULL for allocated/non-existent blocks)
+ */
+block_t next_bl(block_t *bl){
+  block_t *res=bl+get_size(bl);
+  return res<mem_heap_hi ? res : NULL;
+}
+
+block_t prev_bl(block_t *bl){
+  if((*(uint32_t)bl) | prev_mask) return NULL; //previous block allocated or non-existent
+  block_t *ptr=bl-1;
+  uint32_t s=get_size(ptr); //empty blocks have 2 boundary tags
+  return ptr-(s-1);
+}
+
+/* Merge a newly free block with its free neighbors (if possible) */
 block_t *maybe_merge(block_t *bl){
   block_t *next=next_bl(bl);
-  if(!get_allocated(next)){
+  if(next){
     splay_remove(next);
     set_size(bl,get_size(bl)+get_size(next));
   }
   block_t *prev=prev_bl(bl);
-  if(!get_allocated(prev)){
+  if(prev){
     splay_remove(prev);
     set_size(prev,get_size(prev)+get_size(bl));
     bl=prev;
   }
   return bl;
+}
+
+/* Splay tree functions */
+block_t *splay_find(uint32_t size){
+  return NULL;
 }
 
 /*
