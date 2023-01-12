@@ -70,6 +70,27 @@ static inline void set_size(block_t *bl, uint32_t size) {
 }
 
 /* Splay tree functions */
+static inline block_t *get_left(block_t *bl){
+	return (block_t*)((uint32_t*)mem_heap_lo()+*(uint32_t*)(bl+1));
+}
+
+static inline block_t *get_right(block_t *bl){
+	return (block_t*)((uint32_t*)mem_heap_lo()+*(uint32_t*)(bl+2));
+}
+
+static inline void set_left(block_t *bl,block_t *bl2){
+	uint32_t val=(uint32_t)((uint32_t*)bl2-(uint32_t*)mem_heap_lo());
+	*(uint32_t*)(bl+1)=val;
+}
+
+static inline void set_right(block_t *bl,block_t *bl2){
+	uint32_t val=(uint32_t)((uint32_t*)bl2-(uint32_t*)mem_heap_lo());
+	*(uint32_t*)(bl+2)=val;
+}
+
+/* The following code is an adapted version of top-down splay trees
+ * by Daniel Sleator (modified to handle blocks as implemented above)
+ */
 static inline block_t *splay_find(uint32_t size) {
   return NULL;
 }
