@@ -101,11 +101,7 @@ static inline void splay_insert(block_t *node) {
 static inline void splay_remove(block_t *node) {
 }
 
-/* Create a new (unallocated) block and insert it into the tree */
-static inline void create_bl(block_t *ptr,uint32_t size){
-  *(uint32_t*)ptr=size;
-  splay_insert(ptr);
-}
+
 
 /* Utility functions for finding next blocks
  * (or NULL for allocated/non-existent blocks)
@@ -122,6 +118,15 @@ static inline block_t *prev_bl(block_t *bl) {
   block_t *ptr = bl - 1;
   uint32_t s = get_size(ptr); // empty blocks have 2 boundary tags
   return ptr - (s - 1);
+}
+
+/* Create a new (unallocated) block and insert it into the tree */
+static inline void create_bl(block_t *ptr,uint32_t size,bool allocated){
+  *(uint32_t*)ptr=size | (prev_bl(ptr) ? prev_mask : 0) | (allocated ? allocated_mask : 0);
+  if(allocated){
+    *(uint32_t*)(ptr+size-1)=*(uint32_t*)ptr;
+    splay_insert(ptr);
+  }
 }
 
 /* Merge a newly free block with its free neighbors (if possible) */
@@ -163,13 +168,16 @@ void *malloc(size_t size) {
   //printf("%lx\n",(long)mem_sbrk(0));
   //fflush(stdout);
   if (!bl) {
+    //fprintf(stderr,"%ld %lx\n",size,(long)mem_sbrk(0));
     block_t *ptr = mem_sbrk(size);
-    return ptr < 0 ? NULL : (void*)(ptr+1);
+    if(ptr<0) return NULL;
+    create_bl(ptr,size,true);
+    return (void*)(ptr+1);
   } else {
     splay_remove(bl);
     int s = get_size(bl);
     if (s > size) {
-      create_bl(bl + size, s - size);
+      create_bl(bl + size, s - size,false);
       set_size(bl, size);
     }
     return (void*)(bl+1);
