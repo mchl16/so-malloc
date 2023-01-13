@@ -39,6 +39,10 @@
 #define calloc mm_calloc
 #endif /* def DRIVER */
 
+/* Declaration of block_t
+ * (untouched, it is fine)
+ */
+
 typedef struct {
   uint32_t header;
   /*
@@ -53,12 +57,10 @@ static size_t round_up(size_t size) {
   return (size + ALIGNMENT - 1) & -ALIGNMENT;
 }
 
-//static uint32_t root; // compressed pointer to the root of the splay tree
-
 /* Functions for setting boundary tags (size, allocation status etc) */
 
-static const uint32_t allocated_mask = 0x40000000;
-static const uint32_t prev_mask = 0x80000000;
+static const uint32_t allocated_mask = 0x1;
+static const uint32_t prev_mask = 0x2;
 
 static inline uint32_t get_size(block_t *bl) {
   uint32_t mask = !(allocated_mask | prev_mask);
@@ -67,6 +69,16 @@ static inline uint32_t get_size(block_t *bl) {
 
 static inline void set_size(block_t *bl, uint32_t size) {
   *(uint32_t *)bl = (size | allocated_mask | prev_mask);
+}
+
+/* Get pointer to the splay tree root */
+static inline block_t **root(){
+  return (block_t**)mem_heap_lo();
+}
+
+/* Get pointer to the last allocated block */
+static inline block_t **last(){
+  return (block_t**)(mem_heap_lo()+8);
 }
 
 /* Splay tree functions */
@@ -88,17 +100,75 @@ static inline void set_right(block_t *bl,block_t *bl2){
 	*(uint32_t*)(bl+2)=val;
 }
 
-/* The following code is an adapted version of top-down splay trees
- * by Daniel Sleator (modified to handle blocks as implemented above)
- */
+/* My splay tree implementation */
+static inline bool is_nullptr(block_t *bl){
+  return bl==(block_t*)mem_heap_lo();
+}
+
+static inline block_t *rotate_left(block_t *bl){
+	block_t *tmp=get_right(bl);
+	set_right(bl,get_left(tmp));
+	set_left(tmp,bl);
+	return tmp;
+}
+
+static inline block_t *rotate_right(block_t *bl){
+	block_t *tmp=get_left(bl);
+	set_left(bl,get_right(tmp));
+	set_right(tmp,bl);
+	return tmp;
+}
+
+static inline int compare(block_t *lhs,block_t *rhs){
+  if(get_size(lhs)<get_size(rhs)) return 1;
+  else if(get_size(lhs)>get_size(rhs)) return -1;
+  else return lhs<rhs;
+}
+
+static inline block_t *splay(block_t *root,block_t *node){
+  int cmp=compare(node,root);
+  if(cmp==1){
+    if(is_nullptr(get_left(root))) return root;
+    set_left(root,splay(get_left(root),node));
+    return rotate_right(root);
+  }
+  else if(cmp==-1){
+    if(is_nullptr(get_right(root))) return root;
+    set_right(root,splay(get_right(root),node));
+    return rotate_left(root);
+  }
+  else return root;
+}
+
 static inline block_t *splay_find(uint32_t size) {
   return NULL;
 }
 
-static inline void splay_insert(block_t *node) {
+static inline block_t *splay_insert(block_t *root,block_t *node) {
+  if(!root) return node;
+  if(compare(node,root)==1){
+    if((is_nullptr(get_left(node)))) set_left(root,node);
+    else set_left(root,splay_insert(get_left(root),node));
+    return rotate_right(node);
+  }
+  else{
+    if((is_nullptr(get_right(node)))) set_right(root,node);
+    else set_right(root,splay_insert(get_right(root),node));
+    return rotate_left(node);
+  }
 }
 
-static inline void splay_remove(block_t *node) {
+static inline block_t *splay_remove(block_t *root,block_t *node) {
+  if(!root) return root;
+  root=splay(root,node);
+  if(compare(node,root)) return root;
+
+  block_t *bl=get_left(root);
+  if(is_nullptr(bl)) return get_right(root);
+  set_left(root,splay(bl,node));
+  set_right(bl,get_right(root));
+  return bl;
+  
 }
 
 
@@ -116,7 +186,7 @@ static inline block_t *prev_bl(block_t *bl) {
   if ((*(uint32_t *)bl) | prev_mask)
     return NULL; // previous block allocated or non-existent
   block_t *ptr = bl - 1;
-  uint32_t s = get_size(ptr); // empty blocks have 2 boundary tags
+  uint32_t s = get_size(ptr)/4; // empty blocks have 2 boundary tags
   return ptr - (s - 1);
 }
 
@@ -124,8 +194,8 @@ static inline block_t *prev_bl(block_t *bl) {
 static inline void create_bl(block_t *ptr,uint32_t size,bool allocated){
   *(uint32_t*)ptr=size | (prev_bl(ptr) ? prev_mask : 0) | (allocated ? allocated_mask : 0);
   if(allocated){
-    *(uint32_t*)(ptr+size-1)=*(uint32_t*)ptr;
-    splay_insert(ptr);
+    *(uint32_t*)(ptr+size/4-1)=*(uint32_t*)ptr;
+    splay_insert(*root(),ptr);
   }
 }
 
@@ -133,12 +203,12 @@ static inline void create_bl(block_t *ptr,uint32_t size,bool allocated){
 static inline block_t *maybe_merge(block_t *bl) {
   block_t *next = next_bl(bl);
   if (next) {
-    splay_remove(next);
+    splay_remove(*root(),next);
     set_size(bl, get_size(bl) + get_size(next));
   }
   block_t *prev = prev_bl(bl);
   if (prev) {
-    splay_remove(prev);
+    splay_remove(*root(),prev);
     set_size(prev, get_size(prev) + get_size(bl));
     bl = prev;
   }
@@ -149,6 +219,7 @@ static inline block_t *maybe_merge(block_t *bl) {
  * mm_init - Called when a new trace starts.
  */
 int mm_init(void) {
+  /* Allocate memory for splay tree root and last block pointers */
   /* Pad heap start so first payload is at ALIGNMENT. */
   if ((long)mem_sbrk(ALIGNMENT - offsetof(block_t, payload)) < 0)
     return -1;
@@ -174,10 +245,10 @@ void *malloc(size_t size) {
     create_bl(ptr,size,true);
     return (void*)(ptr+1);
   } else {
-    splay_remove(bl);
+    splay_remove(*root(),bl);
     int s = get_size(bl);
     if (s > size) {
-      create_bl(bl + size, s - size,false);
+      create_bl(bl + size/4, s - size,false);
       set_size(bl, size);
     }
     return (void*)(bl+1);
@@ -192,7 +263,7 @@ void *malloc(size_t size) {
 void free(void *ptr) {
   block_t *bl = ptr;
   bl = maybe_merge(bl - 1);
-  splay_insert(bl);
+  splay_insert(*root(),bl);
 }
 
 /*
@@ -200,6 +271,7 @@ void free(void *ptr) {
  *      copying its data, and freeing the old block.
  **/
 void *realloc(void *old_ptr, size_t size) {
+  //fprintf(stderr,"!");
   /* If size == 0 then this is just free, and we return NULL. */
   if (size == 0) {
     free(old_ptr);
@@ -210,15 +282,15 @@ void *realloc(void *old_ptr, size_t size) {
   if (!old_ptr)
     return malloc(size);
 
-  void *new_ptr = malloc(size);
+  block_t *new_ptr = malloc(size);
 
   /* If malloc() fails, the original block is left untouched. */
   if (!new_ptr)
     return NULL;
 
   /* Copy the old data. */
-  block_t *block = old_ptr - offsetof(block_t, payload);
-  size_t old_size = get_size(block);
+  block_t *block = old_ptr - 1;
+  size_t old_size = get_size(block)-4;
   if (size < old_size)
     old_size = size;
   memcpy(new_ptr, old_ptr, old_size);
