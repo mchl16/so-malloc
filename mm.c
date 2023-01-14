@@ -69,6 +69,7 @@ static inline uint32_t get_size(block_t *bl) {
 
 static inline void set_size(block_t *bl, uint32_t size) {
   *(uint32_t *)bl = (size | allocated_mask | prev_mask);
+  memcpy(bl+size/4-1,bl,4);
 }
 
 /* Get pointer to the splay tree root */
@@ -87,6 +88,8 @@ static inline block_t *get_left(block_t *bl){
 }
 
 static inline block_t *get_right(block_t *bl){
+  fprintf(stderr,"%lx %lx ",(long)mem_heap_lo(),(long)mem_sbrk(0));
+  fflush(stderr);
 	return (block_t*)((uint32_t*)mem_heap_lo()+*(uint32_t*)(bl+2));
 }
 
@@ -140,21 +143,27 @@ static inline block_t *splay(block_t *root,block_t *node){
   else return root;
 }
 
+/* Greedy first-fit search */
 static inline block_t *splay_find(uint32_t size) {
+  if(get_size(*root())>=size) return *root();
+  while(!is_nullptr(get_right(*root()))){
+    *root()=rotate_left(*root());
+    if(get_size(*root())>=size) return *root();
+  }
   return NULL;
 }
 
 static inline block_t *splay_insert(block_t *root,block_t *node) {
   if(!root) return node;
   if(compare(node,root)==1){
-    if((is_nullptr(get_left(node)))) set_left(root,node);
+    if((is_nullptr(get_left(root)))) set_left(root,node);
     else set_left(root,splay_insert(get_left(root),node));
-    return rotate_right(node);
+    return rotate_right(root);
   }
   else{
-    if((is_nullptr(get_right(node)))) set_right(root,node);
+    if((is_nullptr(get_right(root)))) set_right(root,node);
     else set_right(root,splay_insert(get_right(root),node));
-    return rotate_left(node);
+    return rotate_left(root);
   }
 }
 
@@ -193,8 +202,9 @@ static inline block_t *prev_bl(block_t *bl) {
 /* Create a new (unallocated) block and insert it into the tree */
 static inline void create_bl(block_t *ptr,uint32_t size,bool allocated){
   *(uint32_t*)ptr=size | (prev_bl(ptr) ? prev_mask : 0) | (allocated ? allocated_mask : 0);
-  if(allocated){
+  if(!allocated){
     *(uint32_t*)(ptr+size/4-1)=*(uint32_t*)ptr;
+    memset(ptr+1,0,8);
     splay_insert(*root(),ptr);
   }
 }
@@ -220,9 +230,14 @@ static inline block_t *maybe_merge(block_t *bl) {
  */
 int mm_init(void) {
   /* Allocate memory for splay tree root and last block pointers */
+  if((long)mem_sbrk(16)<0) return -1;
   /* Pad heap start so first payload is at ALIGNMENT. */
   if ((long)mem_sbrk(ALIGNMENT - offsetof(block_t, payload)) < 0)
     return -1;
+
+  /* Set up the splay tree (initially with one block of size 16) */
+  *root()=mem_sbrk(16);
+  create_bl(*root(),16,false);
   return 0;
 }
 
@@ -235,11 +250,7 @@ int mm_init(void) {
 void *malloc(size_t size) {
   size = round_up(4 + size);
   block_t *bl = splay_find(size);
-
-  //printf("%lx\n",(long)mem_sbrk(0));
-  //fflush(stdout);
   if (!bl) {
-    //fprintf(stderr,"%ld %lx\n",size,(long)mem_sbrk(0));
     block_t *ptr = mem_sbrk(size);
     if(ptr<0) return NULL;
     create_bl(ptr,size,true);
