@@ -63,7 +63,7 @@ static const uint32_t allocated_mask = 0x1;
 static const uint32_t prev_mask = 0x2;
 
 static inline bool get_allocated(block_t *bl){
-  printf("%x^_^%x\n",(*(uint32_t*)bl),(*(uint32_t*)bl)&allocated_mask);
+  // printf("%x^_^%x\n",(*(uint32_t*)bl),(*(uint32_t*)bl)&allocated_mask);
   return (*(uint32_t*)bl)&allocated_mask;
 }
 
@@ -72,7 +72,7 @@ static inline bool get_prev(block_t *bl){
 }
 
 static inline uint32_t get_size(block_t *bl) {
-  uint32_t mask = !(allocated_mask | prev_mask);
+  uint32_t mask = ~(allocated_mask | prev_mask);
   return (*(uint32_t *)bl) & mask;
 }
 
@@ -94,22 +94,22 @@ static inline block_t **last(){
 
 /* Splay tree functions */
 static inline block_t *get_left(block_t *bl){
-	return (block_t*)((uint32_t*)mem_heap_lo()+*(uint32_t*)(bl+1));
+	return (block_t*)((uint64_t)mem_heap_lo()+*(uint32_t*)(bl+1));
 }
 
 static inline block_t *get_right(block_t *bl){
   // fprintf(stderr,"%lx %lx ",(long)mem_heap_lo(),(long)mem_sbrk(0));
   // fflush(stderr);
-	return (block_t*)((uint32_t*)mem_heap_lo()+*(uint32_t*)(bl+2));
+	return (block_t*)((uint64_t)mem_heap_lo()+*(uint32_t*)(bl+1));
 }
 
 static inline void set_left(block_t *bl,block_t *bl2){
-	uint32_t val=(uint32_t)((uint32_t*)bl2-(uint32_t*)mem_heap_lo());
+	uint32_t val=(uint32_t)(*(uint64_t*)bl2-(uint64_t)mem_heap_lo());
 	*(uint32_t*)(bl+1)=val;
 }
 
 static inline void set_right(block_t *bl,block_t *bl2){
-	uint32_t val=(uint32_t)((uint32_t*)bl2-(uint32_t*)mem_heap_lo());
+	uint32_t val=(uint32_t)(*(uint64_t*)bl2-(uint64_t)mem_heap_lo());
 	*(uint32_t*)(bl+2)=val;
 }
 
@@ -210,10 +210,9 @@ static inline block_t *prev_bl(block_t *bl) {
 }
 
 /* Create a new (unallocated) block and insert it into the tree */
-static inline void create_bl(block_t *ptr,uint32_t size,bool allocated){
+static inline void create_bl(block_t *ptr,uint32_t size,bool allocated,bool prev){
   /* A new block is always created to the right of an allocated block */
-  printf("%s",allocated ? "TAK\n" : "NIE\n");
-  *(uint32_t*)ptr=(size | prev_mask | (allocated ? allocated_mask : 0)); 
+  *(uint32_t*)ptr=(size | (prev ? prev_mask : 0) | (allocated ? allocated_mask : 0)); 
   if(!allocated){
     *(uint32_t*)(ptr+size/4-1)=*(uint32_t*)ptr;
     memset(ptr+1,0,8);
@@ -249,8 +248,9 @@ int mm_init(void) {
 
   /* Set up the splay tree (initially with one block of size 16) */
   *root()=mem_sbrk(16);
+  *last()=*root();
   fflush(stdout);
-  create_bl(*root(),16,false);
+  create_bl(*root(),16,false,true);
   return 0;
 }
 
@@ -266,13 +266,14 @@ void *malloc(size_t size) {
   if (!bl) {
     block_t *ptr = mem_sbrk(size);
     if(ptr<0) return NULL;
-    create_bl(ptr,size,true);
+    *last()=ptr;
+    create_bl(ptr,size,true,get_prev(bl));
     return (void*)(ptr+1);
   } else {
     splay_remove(*root(),bl);
     int s = get_size(bl);
     if (s > size) {
-      create_bl(bl + size/4, s - size,false);
+      create_bl(bl + size/4, s - size,false,true);
       set_size(bl, size);
     }
     return (void*)(bl+1);
@@ -339,20 +340,55 @@ void *calloc(size_t nmemb, size_t size) {
   return new_ptr;
 }
 
+/* Attempts to perform DFS on the splay tree (without splaying)
+ * To be used to mm_checkheap
+ */
+
+void check_tree(block_t *bl,int verbose){
+  if(get_allocated(bl)){
+    if(verbose){
+      printf("Zaalokowany blok w drzewie\n");
+    }
+    exit(1);
+  }
+  block_t *l=get_left(bl);
+  if(!is_nullptr(l)){
+    if(l<(block_t*)mem_heap_lo()  || l>=(block_t*)mem_heap_hi() || ((uint64_t)l&15)!=12){
+      if(verbose){
+        printf("Popsuty pointer w bloku w drzewie\n");
+      }
+      exit(1);
+    }
+    check_tree(l,verbose);
+  }
+  block_t *r=get_right(bl);
+  if(!is_nullptr(r)){
+    if(r<(block_t*)mem_heap_lo() || r>=(block_t*)mem_heap_hi() || ((uint64_t)r&15)!=12){
+      if(verbose){
+        printf("Popsuty pointer w bloku w drzewie\n");
+      }
+      exit(1);
+    }
+    check_tree(r,verbose);
+  }
+}
+
 /*
  * mm_checkheap - Check the block list first,
  *                then try to check the splay tree
  */
 void mm_checkheap(int verbose) {
+  /* Check the block list from left to right */
+  if(verbose) printf("\nSprawdzanie listy:\n");
   block_t *ptr=(block_t*)round_up((size_t)mem_heap_lo()+17)-1;
-  block_t *limit=(block_t*)mem_heap_hi();
+  block_t *limit=(block_t*)*last();
   bool prev=true;
-  while(ptr<limit){
+  while(ptr<=limit){
     if(verbose){
       printf("%lx!\n",(long)ptr);
     }
     uint32_t size=get_size(ptr);
-    if(verbose==2) printf("%d\n",size);
+    if(verbose>=2) printf("%d\n",size);
     if(get_prev(ptr)!=prev){
       if(verbose) printf("Popsute dane o poprzednim bloku\n");
       exit(1);
@@ -363,12 +399,16 @@ void mm_checkheap(int verbose) {
       if(*(uint32_t*)(ptr+size2-1)!=*(uint32_t*)ptr){
         if(verbose){
           printf("Popsute boundary tagi w niezaalokowanym bloku\n");
-          printf("%x %x\n",*(uint32_t*)(ptr+size2-1),*(uint32_t*)ptr);
+          printf("%d %x %x\n",size,*(uint32_t*)(ptr+size2-1),*(uint32_t*)ptr);
         }
         exit(1);
       }
     }
     ptr+=size;
   }
+
+  /* Check the splay tree */
+  if(verbose) printf("Sprawdzanie drzewa:\n");
+  check_tree(*root(),verbose);
   if(verbose) printf("Nie stwierdzono usterek\n");
 }
