@@ -39,8 +39,23 @@
 #define calloc mm_calloc
 #endif /* def DRIVER */
 
+/* This memory manager algorithm uses splay trees to search for 
+ * blocks of interesting size (using the first-fit policy).
+ * The memory layout is as follows:
+ * beginning | tree root ptr | last block ptr | padding | blocks | ... | end
+ * Block sizes are multiples of 16 bytes (as required by ABI),
+ * their structure is as follows:
+ * Allocated block: tag (4 B) | data | padding
+ * Unallocated block: tag (4 B) | compressed ptrs to l and r subtrees (2x4 B) | padding | 2nd boundary tag (4 B)
+ * Tags contain information about the block's size and whether it or its left neighbor is allocated.
+ * Blocks are coalesced with their free neighbors immediately upon being freed.
+ * If the splay tree doesn't contain a free block of desired size and the last block is unallocated,
+ * it can be expanded to the requested size (saving a bit of memory).
+ * A similar thing may happen if we want to realloc a block with free neighbors.
+ */
+
 /* Declaration of block_t
- * (untouched, it is fine)
+ * (untouched, it is fine for my needs)
  */
 
 typedef struct {
@@ -92,6 +107,21 @@ static inline block_t **last(){
   return (block_t**)(mem_heap_lo()+8);
 }
 
+/* My splay tree implementation */
+
+/* Pointer manipulation functions */
+static inline uint32_t get_offset(block_t *ptr){
+  return ((uint64_t)ptr-(uint64_t)mem_heap_lo());
+}
+
+static inline block_t *get_ptr(uint32_t offset){
+  return (block_t*)((uint64_t)mem_heap_lo()+offset);
+}
+
+static inline bool is_nullptr(block_t *bl){
+  return bl==(block_t*)mem_heap_lo();
+}
+
 /* Splay tree functions */
 static inline block_t *get_left(block_t *bl){
 	return (block_t*)((uint64_t)mem_heap_lo()+*(uint32_t*)(bl+1));
@@ -113,10 +143,8 @@ static inline void set_right(block_t *bl,block_t *bl2){
 	*(uint32_t*)(bl+2)=val;
 }
 
-/* My splay tree implementation */
-static inline bool is_nullptr(block_t *bl){
-  return bl==(block_t*)mem_heap_lo();
-}
+
+
 
 static inline block_t *rotate_left(block_t *bl){
 	block_t *tmp=get_right(bl);
