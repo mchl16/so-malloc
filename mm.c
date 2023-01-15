@@ -115,7 +115,7 @@ static inline block_t **root() {
 
 /* Get pointer to the last allocated block */
 static inline block_t **last() {
-  return (block_t **)(mem_heap_lo() + 8);
+  return (block_t **)((uint64_t)mem_heap_lo() + 8);
 }
 
 /* My splay tree implementation */
@@ -185,8 +185,10 @@ static inline block_t *splay(block_t *root, block_t *node) {
       return root;
     set_right(root, splay(get_right(root), node));
     return rotate_left(root);
-  } else
+  } else{
     return root;
+  }
+    
 }
 
 /* Greedy first-fit search */
@@ -205,9 +207,6 @@ static inline block_t *splay_find(uint32_t size) {
 static inline block_t *_splay_insert(block_t *root, block_t *node) {
   if (is_nullptr(root))
     return node;
-
-  printf("Kupa\n");
-  printf("%lx %lx\n",(long)root,(long)node);
   if (compare(node, root) == 1) {
     if ((is_nullptr(get_left(root))))
       set_left(root, node);
@@ -275,7 +274,6 @@ static inline void create_bl(block_t *ptr, uint32_t size, bool allocated,
   if (!allocated) {
     *(uint32_t *)(ptr + size / 4 - 1) = *(uint32_t *)ptr;
     memset(ptr + 1, 0, 8);
-    splay_insert(ptr);
   }
   block_t *bl=next_bl(ptr);
   if(!is_nullptr(bl)){
@@ -326,30 +324,30 @@ int mm_init(void) {
  * new block using mem_sbrk (if possible).
  */
 void *malloc(size_t size) {
-  debug("%ld!!\n", size);
+  //debug("%ld!!\n", size);
   size = round_up(4 + size);
   block_t *bl = splay_find(size);
   if (!bl) {
     block_t *ptr = mem_sbrk(size);
     if (ptr < 0)
       return NULL;
-    debug("%lx?!\n", (long)*last());
+    //debug("%lx?!\n", (long)*last());
     create_bl(ptr, size, true, get_allocated(*last()));
     *last() = ptr;
     return (void *)(ptr + 1);
   } else {
-    debug("Eureka!\n");
+    // debug("Eureka!\n");
     splay_remove(bl);
-    printf("%lx",(long)*root());
+    //printf("%lx",(long)*root());
     uint32_t s = get_size(bl);
     if (s > size) {
       create_bl(bl + size / 4, s - size, false, true);
     }
     else{
       block_t *bl2=next_bl(bl);
-      printf("Kot\n");
+      // printf("Kot\n");
       if(!is_nullptr(bl2)){
-        printf("kocha\n");
+        // printf("kocha\n");
         set_prev(bl2,true);
       }
     }
@@ -364,9 +362,10 @@ void *malloc(size_t size) {
  *        and add it back to the tree.
  */
 void free(void *ptr) {
-  debug("free %lx???\n",(long)ptr);
+  // debug("free %lx???\n",(long)ptr);
   block_t *bl = ptr;
   bl = maybe_merge(bl - 1);
+  // printf("%lx %lx, sadge\n",(long)*root(),(long)bl);
   splay_insert(bl);
 }
 
@@ -468,8 +467,9 @@ void check_tree(block_t *bl, int verbose) {
  */
 void mm_checkheap(int verbose) {
   /* Check the block list from left to right */
+  static int ops=0;
   if (verbose)
-    printf("\nSprawdzanie listy:\n");
+    printf("\nSprawdzanie listy (po operacji %d):\n",ops++);
   block_t *ptr = (block_t *)((uint64_t)mem_heap_lo() + 16 +
                              (ALIGNMENT - offsetof(block_t, payload)));
   block_t *limit = (block_t *)*last();
@@ -514,8 +514,13 @@ void mm_checkheap(int verbose) {
   }
 
   /* Check the splay tree */
-  if (verbose)
+  if (verbose){
     printf("Sprawdzanie drzewa:\n");
+    if(verbose>=2){
+      printf("Root: %lx\n",(long)*root());
+    }
+  }
+    
   check_tree(*root(), verbose);
   if (verbose)
     printf("Nie stwierdzono usterek\n");
