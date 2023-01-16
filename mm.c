@@ -83,18 +83,22 @@ static inline bool get_allocated(block_t *bl) {
   return (*(uint32_t *)bl) & allocated_mask;
 }
 
-static inline void set_allocated(block_t *bl,bool val){
-  if(val) *(uint32_t*)bl|=allocated_mask;
-  else *(uint32_t*)bl&=~allocated_mask;
+static inline void set_allocated(block_t *bl, bool val) {
+  if (val)
+    *(uint32_t *)bl |= allocated_mask;
+  else
+    *(uint32_t *)bl &= ~allocated_mask;
 }
 
 static inline bool get_prev(block_t *bl) {
   return (*(uint32_t *)bl) & prev_mask;
 }
 
-static inline void set_prev(block_t *bl,bool val){
-  if(val) *(uint32_t*)bl|=prev_mask;
-  else *(uint32_t*)bl&=~prev_mask;
+static inline void set_prev(block_t *bl, bool val) {
+  if (val)
+    *(uint32_t *)bl |= prev_mask;
+  else
+    *(uint32_t *)bl &= ~prev_mask;
 }
 
 static inline uint32_t get_size(block_t *bl) {
@@ -185,15 +189,15 @@ static inline block_t *splay(block_t *root, block_t *node) {
       return root;
     set_right(root, splay(get_right(root), node));
     return rotate_left(root);
-  } else{
+  } else {
     return root;
   }
-    
 }
 
 /* Greedy first-fit search */
 static inline block_t *splay_find(uint32_t size) {
-  if(is_nullptr(*root())) return NULL;
+  if (is_nullptr(*root()))
+    return NULL;
   if (get_size(*root()) >= size)
     return *root();
   while (!is_nullptr(get_right(*root()))) {
@@ -232,29 +236,30 @@ static inline block_t *_splay_remove(block_t *root, block_t *node) {
   block_t *bl = get_left(root);
   if (is_nullptr(bl))
     return get_right(root);
-  bl=splay(bl, node);
+  bl = splay(bl, node);
   set_right(bl, get_right(root));
   return bl;
 }
 
 /* Wrappers */
-static inline void splay_insert(block_t *node){
-  *root()=_splay_insert(*root(),node);
+static inline void splay_insert(block_t *node) {
+  *root() = _splay_insert(*root(), node);
 }
 
 /* Wrappers */
-static inline void splay_remove(block_t *node){
-  *root()=_splay_remove(*root(),node);
+static inline void splay_remove(block_t *node) {
+  *root() = _splay_remove(*root(), node);
 }
 
 /* Return a pointer to the next block (no matter if allocated or not) */
 static inline block_t *next_bl(block_t *bl) {
-  block_t *res = bl + get_size(bl)/4;
-  if ((void *)res >= mem_heap_hi()) return mem_heap_lo();
+  block_t *res = bl + get_size(bl) / 4;
+  if ((void *)res > mem_heap_hi())
+    return mem_heap_lo();
   return res;
 }
 
-/* If the previous block is allocated, return a pointer to it */
+/* If the previous block isn't allocated, return a pointer to it */
 static inline block_t *prev_bl(block_t *bl) {
   if (get_prev(bl))
     return mem_heap_lo(); // previous block allocated or non-existent
@@ -275,26 +280,30 @@ static inline void create_bl(block_t *ptr, uint32_t size, bool allocated,
     *(uint32_t *)(ptr + size / 4 - 1) = *(uint32_t *)ptr;
     memset(ptr + 1, 0, 8);
   }
-  block_t *bl=next_bl(ptr);
-  if(!is_nullptr(bl)){
-    set_prev(bl,allocated);
+  block_t *bl = next_bl(ptr);
+  if (!is_nullptr(bl)) {
+    set_prev(bl, allocated);
   }
 }
 
 /* Merge a newly free block with its free neighbors (if possible) */
-static inline block_t *maybe_merge(block_t *bl) {
+static inline block_t *maybe_merge(block_t *bl, bool allocated) {
   block_t *next = next_bl(bl);
   if (!is_nullptr(next) && !get_allocated(next)) {
     splay_remove(next);
     set_size(bl, get_size(bl) + get_size(next));
+    if (*last() == next)
+      *last() = bl;
   }
   block_t *prev = prev_bl(bl);
   if (!is_nullptr(prev)) {
     splay_remove(prev);
     set_size(prev, get_size(prev) + get_size(bl));
+    if (*last() == bl)
+      *last() = prev;
     bl = prev;
   }
-  create_bl(bl,get_size(bl),false,get_prev(bl));
+  create_bl(bl, get_size(bl), allocated, get_prev(bl));
   return bl;
 }
 
@@ -311,8 +320,8 @@ int mm_init(void) {
 
   /* Set up the splay tree (initially with one block of size 16) */
   block_t *bl = mem_sbrk(16);
-  *root()=mem_heap_lo();
-  *last()=bl;
+  *root() = bl;
+  *last() = bl;
   create_bl(bl, 16, false, true);
   return 0;
 }
@@ -324,34 +333,33 @@ int mm_init(void) {
  * new block using mem_sbrk (if possible).
  */
 void *malloc(size_t size) {
-  //debug("%ld!!\n", size);
+  // printf("M %ld\n",size);
   size = round_up(4 + size);
   block_t *bl = splay_find(size);
   if (!bl) {
     block_t *ptr = mem_sbrk(size);
     if (ptr < 0)
       return NULL;
-    //debug("%lx?!\n", (long)*last());
     create_bl(ptr, size, true, get_allocated(*last()));
     *last() = ptr;
     return (void *)(ptr + 1);
   } else {
-    // debug("Eureka!\n");
+    // printf("Eureka!\n");
     splay_remove(bl);
-    //printf("%lx",(long)*root());
     uint32_t s = get_size(bl);
     if (s > size) {
-      create_bl(bl + size / 4, s - size, false, true);
-    }
-    else{
-      block_t *bl2=next_bl(bl);
-      // printf("Kot\n");
-      if(!is_nullptr(bl2)){
-        // printf("kocha\n");
-        set_prev(bl2,true);
+      block_t *bl2 = bl + size / 4;
+      create_bl(bl2, s - size, false, true);
+      splay_insert(bl2);
+      if (bl2 > *last())
+        *last() = bl2;
+    } else {
+      block_t *bl2 = next_bl(bl);
+      if (!is_nullptr(bl2)) {
+        set_prev(bl2, true);
       }
     }
-    create_bl(bl,size,true,get_prev(bl));
+    create_bl(bl, size, true, get_prev(bl));
     return (void *)(bl + 1);
   }
 }
@@ -362,10 +370,12 @@ void *malloc(size_t size) {
  *        and add it back to the tree.
  */
 void free(void *ptr) {
-  // debug("free %lx???\n",(long)ptr);
+  // printf("F\n");
+  /* Do nothing for nullptrs */
+  if (!ptr)
+    return;
   block_t *bl = ptr;
-  bl = maybe_merge(bl - 1);
-  // printf("%lx %lx, sadge\n",(long)*root(),(long)bl);
+  bl = maybe_merge(bl - 1, false);
   splay_insert(bl);
 }
 
@@ -374,6 +384,7 @@ void free(void *ptr) {
  *      copying its data, and freeing the old block.
  **/
 void *realloc(void *old_ptr, size_t size) {
+  // printf("R %lx %lx\n",(long)old_ptr,size);
   /* If size == 0 then this is just free, and we return NULL. */
   if (size == 0) {
     free(old_ptr);
@@ -421,10 +432,11 @@ void *calloc(size_t nmemb, size_t size) {
  * To be used to mm_checkheap
  */
 
-void check_tree(block_t *bl, int verbose) {
-  if(is_nullptr(bl)) return;
+static inline void check_tree(block_t *bl, int verbose) {
+  if (is_nullptr(bl))
+    return;
   if (verbose >= 2)
-    debug("->%lx\n", (long)bl);
+    printf("->%lx\n", (long)bl);
   if (get_allocated(bl)) {
     if (verbose) {
       printf("Zaalokowany blok w drzewie\n");
@@ -433,30 +445,48 @@ void check_tree(block_t *bl, int verbose) {
   }
   block_t *l = get_left(bl);
   if (!is_nullptr(l)) {
-    if (l < (block_t *)mem_heap_lo() || l >= (block_t *)mem_heap_hi() ||
-        ((uint64_t)l & 15) != 12 || l==bl) {
+    if (l < (block_t *)mem_heap_lo() || l > (block_t *)mem_heap_hi() ||
+        ((uint64_t)l & 15) != 12 || l == bl) {
       if (verbose) {
         printf("Popsuty pointer w bloku w drzewie\n");
-        printf("%x %x %x\n",*(uint32_t*)bl,*(uint32_t*)(bl+1),*(uint32_t*)(bl+2));
+        printf("%x %x %x\n", *(uint32_t *)bl, *(uint32_t *)(bl + 1),
+               *(uint32_t *)(bl + 2));
       }
       exit(1);
     }
     if (verbose >= 2)
       printf("l->%lx\n", (long)l);
+    if (compare(l, bl) != 1) {
+      if (verbose) {
+        printf("Popsuty porzadek w drzewie\n");
+        printf("%x %lx >= %x %lx\n", get_size(l), (long)l, get_size(bl),
+               (long)bl);
+      }
+      exit(1);
+    }
     check_tree(l, verbose);
   }
   block_t *r = get_right(bl);
   if (!is_nullptr(r)) {
-    if (r < (block_t *)mem_heap_lo() || r >= (block_t *)mem_heap_hi() ||
-        ((uint64_t)r & 15) != 12 || r==bl) {
+    if (r < (block_t *)mem_heap_lo() || r > (block_t *)mem_heap_hi() ||
+        ((uint64_t)r & 15) != 12 || r == bl) {
       if (verbose) {
         printf("Popsuty pointer w bloku w drzewie\n");
-        printf("%x %x %x\n",*(uint32_t*)bl,*(uint32_t*)(bl+1),*(uint32_t*)(bl+2));
+        printf("%x %x %x\n", *(uint32_t *)bl, *(uint32_t *)(bl + 1),
+               *(uint32_t *)(bl + 2));
       }
       exit(1);
     }
     if (verbose >= 2)
       printf("r->%lx\n", (long)r);
+    if (compare(bl, r) != 1) {
+      if (verbose) {
+        printf("Popsuty porzadek w drzewie\n");
+        printf("%x %lx >= %x %lx\n", get_size(bl), (long)bl, get_size(r),
+               (long)r);
+      }
+      exit(1);
+    }
     check_tree(r, verbose);
   }
 }
@@ -467,16 +497,18 @@ void check_tree(block_t *bl, int verbose) {
  */
 void mm_checkheap(int verbose) {
   /* Check the block list from left to right */
-  static int ops=0;
+  static int ops = 0;
   if (verbose)
-    printf("\nSprawdzanie listy (po operacji %d):\n",ops++);
+    printf("\nSprawdzanie listy (po operacji %d, last=%lx):\n", ops++,
+           (long)mem_heap_hi()); //*last()
   block_t *ptr = (block_t *)((uint64_t)mem_heap_lo() + 16 +
                              (ALIGNMENT - offsetof(block_t, payload)));
   block_t *limit = (block_t *)*last();
   bool prev = true;
   while (ptr <= limit) {
     if (verbose) {
-      printf("%lx %d %s %s!\n", (long)ptr, get_size(ptr), get_allocated(ptr) ? "TAK" : "NIE", get_prev(ptr) ? "TAK" : "NIE");
+      printf("%lx %d %s %s!\n", (long)ptr, get_size(ptr),
+             get_allocated(ptr) ? "TAK" : "NIE", get_prev(ptr) ? "TAK" : "NIE");
     }
     uint32_t size = get_size(ptr);
     if (verbose >= 2)
@@ -493,7 +525,9 @@ void mm_checkheap(int verbose) {
     uint32_t size2 = size / 4;
     prev = get_allocated(ptr);
     if (!get_allocated(ptr)) {
-      if(verbose>=2) printf("%x %x %x\n",*(uint32_t*)ptr,*(uint32_t*)(ptr+1),*(uint32_t*)(ptr+2));
+      if (verbose >= 2)
+        printf("%x %x %x\n", *(uint32_t *)ptr, *(uint32_t *)(ptr + 1),
+               *(uint32_t *)(ptr + 2));
       if (*(uint32_t *)(ptr + size2 - 1) != *(uint32_t *)ptr) {
         if (verbose) {
           printf("Popsute boundary tagi w niezaalokowanym bloku\n");
@@ -501,11 +535,11 @@ void mm_checkheap(int verbose) {
                  *(uint32_t *)(ptr + size2 - 1));
         }
         exit(1);
-      }
-      else if(get_left(ptr)==ptr || get_right(ptr)==ptr){
-        if(verbose){
+      } else if (get_left(ptr) == ptr || get_right(ptr) == ptr) {
+        if (verbose) {
           printf("Popsuty pointer w bloku w drzewie\n");
-          printf("%x %x %x\n",*(uint32_t*)ptr,*(uint32_t*)(ptr+1),*(uint32_t*)(ptr+2));
+          printf("%x %x %x\n", *(uint32_t *)ptr, *(uint32_t *)(ptr + 1),
+                 *(uint32_t *)(ptr + 2));
         }
         exit(1);
       }
@@ -514,13 +548,13 @@ void mm_checkheap(int verbose) {
   }
 
   /* Check the splay tree */
-  if (verbose){
+  if (verbose) {
     printf("Sprawdzanie drzewa:\n");
-    if(verbose>=2){
-      printf("Root: %lx\n",(long)*root());
+    if (verbose >= 2) {
+      printf("Root: %lx\n", (long)*root());
     }
   }
-    
+
   check_tree(*root(), verbose);
   if (verbose)
     printf("Nie stwierdzono usterek\n");
