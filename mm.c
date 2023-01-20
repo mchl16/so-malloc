@@ -337,20 +337,19 @@ void *malloc(size_t size) {
   size = round_up(4 + size);
   block_t *bl = splay_find(size);
   if (!bl) {
-    if(get_allocated(*last())){
+    if (get_allocated(*last())) {
       block_t *ptr = mem_sbrk(size);
       if (ptr < 0)
         return NULL;
       create_bl(ptr, size, true, true);
       *last() = ptr;
-    }
-    else{
-      block_t *ptr = mem_sbrk(size-get_size(*last()));
+    } else {
+      block_t *ptr = mem_sbrk(size - get_size(*last()));
       if (ptr < 0)
         return NULL;
       splay_remove(*last());
       create_bl(*last(), size, true, true);
-    }    
+    }
     return (void *)(*last() + 1);
   } else {
     // printf("Eureka!\n");
