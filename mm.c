@@ -287,7 +287,7 @@ static inline void create_bl(block_t *ptr, uint32_t size, bool allocated,
 }
 
 /* Merge a newly free block with its free neighbors (if possible) */
-static inline block_t *maybe_merge(block_t *bl, bool allocated) {
+static inline block_t *maybe_merge(block_t *bl) {
   block_t *next = next_bl(bl);
   if (!is_nullptr(next) && !get_allocated(next)) {
     splay_remove(next);
@@ -303,7 +303,7 @@ static inline block_t *maybe_merge(block_t *bl, bool allocated) {
       *last() = prev;
     bl = prev;
   }
-  create_bl(bl, get_size(bl), allocated, get_prev(bl));
+  create_bl(bl, get_size(bl), false, get_prev(bl));
   return bl;
 }
 
@@ -375,7 +375,7 @@ void free(void *ptr) {
   if (!ptr)
     return;
   block_t *bl = ptr;
-  bl = maybe_merge(bl - 1, false);
+  bl = maybe_merge(bl - 1);
   splay_insert(bl);
 }
 
