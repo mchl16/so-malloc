@@ -392,7 +392,7 @@ void free(void *ptr) {
  *      copying its data, and freeing the old block.
  **/
 void *realloc(void *old_ptr, size_t size) {
-  // printf("R %lx %lx\n",(long)old_ptr,size);
+  // printf("R %lx %ld\n",(long)old_ptr,size);
   /* If size == 0 then this is just free, and we return NULL. */
   if (size == 0) {
     free(old_ptr);
@@ -403,6 +403,31 @@ void *realloc(void *old_ptr, size_t size) {
   if (!old_ptr)
     return malloc(size);
 
+  block_t *bl = (block_t *)old_ptr - 1;
+  size_t size2 = round_up(4 + size);
+
+  size_t old_size = get_size(bl);
+  /* If the new size is smaller, shrink the block and free memory */
+  if (size2 < old_size) {
+    // block_t *bl2=bl+size2/4;
+    // create_bl(bl2,old_size-size2,false,true);
+    // set_size(bl,size2);
+    // if(*last()==bl) *last()=bl2;
+    // else bl2=maybe_merge(bl2);
+    // splay_insert(bl2);
+
+    // return old_ptr;
+  } else if (size2 == old_size)
+    return old_ptr;
+  else if (bl == *last()) {
+    if (mem_sbrk(size2 - old_size) < 0)
+      ;
+    else {
+      set_size(bl, size2);
+      return old_ptr;
+    }
+  }
+
   block_t *new_ptr = malloc(size);
 
   /* If malloc() fails, the original block is left untouched. */
@@ -410,11 +435,9 @@ void *realloc(void *old_ptr, size_t size) {
     return NULL;
 
   /* Copy the old data. */
-  block_t *block = old_ptr - 1;
-  size_t old_size = get_size(block) - 4;
-  if (size < old_size)
-    old_size = size;
-  memcpy(new_ptr, old_ptr, old_size);
+  if (size2 < old_size)
+    old_size = size2;
+  memcpy(new_ptr, old_ptr, old_size - 4);
 
   /* Free the old block. */
   free(old_ptr);
