@@ -308,6 +308,67 @@ static inline block_t *maybe_merge(block_t *bl) {
   return bl;
 }
 
+/* Expand an allocated block if possible, otherwise do nothing */
+static inline void *expand_bl(block_t *bl, uint32_t size) {
+  /* Try to expand to the right first */
+  uint32_t bl_size = get_size(bl);
+  block_t *next = next_bl(bl);
+  bool next_flag = is_nullptr(next) || get_allocated(next);
+  if (!next_flag) {
+    bl_size += get_size(next);
+    if (bl_size >= size) {
+      splay_remove(next);
+      set_size(bl, size, true);
+      if (bl_size > size) {
+        block_t *bl2 = bl + size / 4;
+        create_bl(bl2, bl_size - size, false, true);
+        splay_insert(bl2);
+        if (*last() == next)
+          *last() = bl2;
+      } else {
+        block_t *bl2 = next_bl(next);
+        if (!is_nullptr(bl2)) {
+          set_prev(bl2, true);
+        } else {
+          *last() = bl;
+        }
+      }
+      return bl + 1;
+    }
+  }
+
+  block_t *prev = prev_bl(bl);
+  if (is_nullptr(prev))
+    return NULL;
+
+  uint32_t prev_size = get_size(prev);
+  if (bl_size + prev_size >= size) {
+    if (get_size(prev) + get_size(bl) < size) {
+      if (next_flag)
+        return NULL;
+      else {
+        bl_size += prev_size;
+        splay_remove(next);
+      }
+    } else
+      next_flag = true;
+    splay_remove(prev);
+    if (bl_size > size) {
+      block_t *bl2 = prev + size / 4;
+      create_bl(bl2, bl_size - size, false, true);
+      if (*last() == bl || (!next_flag && *last() == next))
+        *last() = bl2;
+      splay_insert(bl2);
+    } else if (*last() == next || *last() == bl)
+      *last() = prev;
+    create_bl(prev, size, true, get_prev(prev));
+    memmove(prev + 1, bl + 1, size - 4);
+
+    return prev + 1;
+  }
+  return NULL;
+}
+
 /*
  * mm_init - Called when a new trace starts.
  */
@@ -431,7 +492,13 @@ void *realloc(void *old_ptr, size_t size) {
     return old_ptr;
   }
 
-  block_t *new_ptr = malloc(size);
+  /* Try to expand the existing block */
+  block_t *new_ptr = expand_bl(bl, size2);
+  if (new_ptr) {
+    return new_ptr;
+  }
+
+  new_ptr = malloc(size);
 
   /* If malloc() fails, the original block is left untouched. */
   if (!new_ptr)
