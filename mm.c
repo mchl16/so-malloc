@@ -106,10 +106,11 @@ static inline uint32_t get_size(block_t *bl) {
   return (*(uint32_t *)bl) & mask;
 }
 
-static inline void set_size(block_t *bl, uint32_t size) {
+static inline void set_size(block_t *bl, uint32_t size, bool allocated) {
   *(uint32_t *)bl &= 3;
   *(uint32_t *)bl |= size;
-  memcpy(bl + size / 4 - 1, bl, 4);
+  if (!allocated)
+    memcpy(bl + size / 4 - 1, bl, 4);
 }
 
 /* Get pointer to the splay tree root */
@@ -291,14 +292,14 @@ static inline block_t *maybe_merge(block_t *bl) {
   block_t *next = next_bl(bl);
   if (!is_nullptr(next) && !get_allocated(next)) {
     splay_remove(next);
-    set_size(bl, get_size(bl) + get_size(next));
+    set_size(bl, get_size(bl) + get_size(next), false);
     if (*last() == next)
       *last() = bl;
   }
   block_t *prev = prev_bl(bl);
   if (!is_nullptr(prev)) {
     splay_remove(prev);
-    set_size(prev, get_size(prev) + get_size(bl));
+    set_size(prev, get_size(prev) + get_size(bl), false);
     if (*last() == bl)
       *last() = prev;
     bl = prev;
@@ -378,7 +379,7 @@ void *malloc(size_t size) {
  *        and add it back to the tree.
  */
 void free(void *ptr) {
-  // printf("F\n");
+  // printf("F %lx\n",(long)ptr);
   /* Do nothing for nullptrs */
   if (!ptr)
     return;
@@ -409,23 +410,25 @@ void *realloc(void *old_ptr, size_t size) {
   size_t old_size = get_size(bl);
   /* If the new size is smaller, shrink the block and free memory */
   if (size2 < old_size) {
-    // block_t *bl2=bl+size2/4;
-    // create_bl(bl2,old_size-size2,false,true);
-    // set_size(bl,size2);
-    // if(*last()==bl) *last()=bl2;
-    // else bl2=maybe_merge(bl2);
-    // splay_insert(bl2);
+    set_size(bl, size2, true);
+    block_t *bl2 = bl + size2 / 4;
+    create_bl(bl2, old_size - size2, false, true);
 
-    // return old_ptr;
-  } else if (size2 == old_size)
+    if (*last() == bl)
+      *last() = bl2;
+    else
+      bl2 = maybe_merge(bl2);
+    splay_insert(bl2);
+
     return old_ptr;
-  else if (bl == *last()) {
-    if (mem_sbrk(size2 - old_size) < 0)
-      ;
-    else {
-      set_size(bl, size2);
-      return old_ptr;
-    }
+  }
+  /* Do nothing, the current block is fine */
+  else if (size2 == old_size)
+    return old_ptr;
+  /* The last block may be expanded using mem_sbrk */
+  else if (bl == *last() && mem_sbrk(size2 - old_size) > 0) {
+    set_size(bl, size2, true);
+    return old_ptr;
   }
 
   block_t *new_ptr = malloc(size);
